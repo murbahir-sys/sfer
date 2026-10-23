@@ -232,6 +232,24 @@ function gauss(e) {
   return s + '<div class="p">Расхождение ' + n5(d) + (d < 2e-5 ? ' — в последнем знаке, решение верно ' + OK : ' ' + BAD) + '</div>';
 }
 
+
+/* ---------- Контроль по теореме синусов (основной) ---------- */
+var SINE_TOL = 5e-5;
+function sineCheck(e) {
+  var r = [], rows = '';
+  [['a', 'A'], ['b', 'B'], ['c', 'C']].forEach(function (p) {
+    var ss = sin(e[p[0]]), sa = sin(e[p[1]]);
+    var q = Math.abs(sa) < 1e-9 ? NaN : ss / sa;
+    r.push(q);
+    rows += '<div class="f">sin ' + p[0] + ' / sin ' + p[1] + ' = sin ' + fmt(e[p[0]]) + ' / sin ' + fmt(e[p[1]]) + ' = ' + n5(ss) + ' / ' + n5(sa) + ' = ' + (isFinite(q) ? n5(q) : '— (sin ' + p[1] + ' = 0)') + '</div>';
+  });
+  var ok = r.every(isFinite), d = ok ? Math.max(Math.abs(r[0] - r[1]), Math.abs(r[0] - r[2]), Math.abs(r[1] - r[2])) : NaN;
+  var pass = ok && d <= SINE_TOL;
+  return { ratios: r, d: d, pass: pass, html: '<p>Формула синусов (6.8): sin a / sin A = sin b / sin B = sin c / sin C. Подставляем все шесть элементов — данные и найденные.</p>' + rows +
+    '<div class="f">Отношения: ' + r.map(function (x) { return isFinite(x) ? n5(x) : '—'; }).join(';   ') + '</div>' +
+    '<div class="p">Наибольшее расхождение: ' + (ok ? n5(d) : '—') + ' (допуск ' + n5(SINE_TOL) + ', последний знак) ' + (pass ? '— решение верно ' + OK : '— контроль не сошёлся ' + BAD) + '</div>' };
+}
+
 /* ---------- Сборка ---------- */
 function formulaChoice(T, info) {
   if (info.right) return { text: 'Прямоугольный треугольник (' + info.pair + '): по табл. 6.1 решаем по правилу Модюи — Непера, каждый искомый — через данные.', keys: ['neper'].concat(info.key === 'B,b' || info.key === 'C,c' ? ['6.8'] : []) };
@@ -306,7 +324,8 @@ function buildColumns(g, res, idx, showAns) {
     c2 += card('1. Выбор формул', '<p>' + ch.text + '</p>' + ch.keys.map(function (k) { return '<div class="why"><b>' + WHY[k].name + '</b><br>Откуда и почему: ' + WHY[k].why + '</div>'; }).join(''));
     if (cand) c2 += card('Выбор четверти', cand.map(function (c) { return '<p>' + c.name + ' = ' + fmt(c.x) + (c.ok ? ' — принят ' + OK : ' — отброшен: ' + c.why + ' ' + BAD) + '</p>'; }).join(''));
     c2 += card('2. Подстановка и счёт (по шагам)', renderSteps(sol.steps));
-    if (T === 3 || T === 4 || !info.right && !info.quad) c2 += card('Контроль по формуле Гаусса (Деламбра)', gauss(sol.e));
+    c2 += '<div class="xcard sine">' + '<div class="xh">3. Контроль по теореме синусов (основной)</div>' + sineCheck(sol.e).html + '</div>';
+    c2 += card('4. Дополнительный контроль по формуле Гаусса (Деламбра)', gauss(sol.e));
     if (sol.small && sol.plane) c2 += '<p><b>Плоский ответ:</b> ' + sol.unknown.map(function (k) { return k + ' = ' + fmt2(sol.plane[k]); }).join('; ') + '.</p>';
     if (est.exp.length) c2 += '<p>Оценка ' + (est.exp.every(function (x) { return x.f(sol.e); }) ? 'подтвердилась ' + OK : 'не подтвердилась ' + BAD) + '</p>';
   }
@@ -322,4 +341,4 @@ function showColumns(host, g, res) {
   }
   draw();
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { buildColumns: buildColumns };
+if (typeof module !== 'undefined' && module.exports) module.exports = { buildColumns: buildColumns, sineCheck: sineCheck };

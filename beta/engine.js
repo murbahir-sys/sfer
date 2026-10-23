@@ -358,7 +358,6 @@ function finishSolution(e, st, given) {
     st.p('Одна из сторон получилась 90°, хотя в данных её не было: треугольник четвертной.');
   var plane = meta.small ? planeSolve(given) : null;
   if (meta.small) smallNote(given, e, st, plane);
-  sineControl(st, e);
   var unknown = NAMES.filter(function (k) { return !(k in given); });
   var fmtv = meta.small ? fmt2 : fmt;
   st.h('Ответ');
