@@ -264,8 +264,8 @@ function formulaChoice(T, info) {
 }
 function card(title, body) { return '<div class="xcard"><div class="xh">' + title + '</div>' + body + '</div>'; }
 
-function buildColumns(g, res, idx, showAns) {
-  idx = idx || 0;
+function buildColumns(g, res, idx, showAns, mode) {
+  idx = idx || 0; mode = mode || { ang: '6.12', side: 'auto' };
   var T = xType(g), info = rightInfo(g), sols = res.solutions || [], sol = sols[idx];
   var unknown = NAMES.filter(function (k) { return !(k in g); });
   // Столбец 1
@@ -323,22 +323,278 @@ function buildColumns(g, res, idx, showAns) {
     var ch = formulaChoice(T, info);
     c2 += card('1. Выбор формул', '<p>' + ch.text + '</p>' + ch.keys.map(function (k) { return '<div class="why"><b>' + WHY[k].name + '</b><br>Откуда и почему: ' + WHY[k].why + '</div>'; }).join(''));
     if (cand) c2 += card('Выбор четверти', cand.map(function (c) { return '<p>' + c.name + ' = ' + fmt(c.x) + (c.ok ? ' — принят ' + OK : ' — отброшен: ' + c.why + ' ' + BAD) + '</p>'; }).join(''));
-    c2 += card('2. Подстановка и счёт (по шагам)', renderSteps(sol.steps));
+    if ((T === 3 || T === 4) && !info.right && !info.quad) c2 += '<div class="xmode">Углы/стороны: <select id="xang"><option value="6.12"' + (mode.ang === '6.12' ? ' selected' : '') + '>' + (T === 3 ? '(6.12)' : '(6.13)') + ' аналогии Непера</option><option value="6.11"' + (mode.ang === '6.11' ? ' selected' : '') + '>(6.11) котангенсы</option></select>' +
+      (T === 3 ? ' Третья сторона: <select id="xside"><option value="auto"' + (mode.side === 'auto' ? ' selected' : '') + '>авто</option><option value="6.9"' + (mode.side === '6.9' ? ' selected' : '') + '>(6.9)</option><option value="6.14"' + (mode.side === '6.14' ? ' selected' : '') + '>(6.14)</option></select>' : '') + '</div>';
+    if (info.right || info.quad) c2 += card('Круг Модюи — Непера ' + (info.right ? '(6.15)' : '(6.16)'), drawNeper(g, sol.e, info) + neperRulesHtml(info));
+    sol.multi = sols.length > 1;
+    buildElementCards(g, sol, res, mode).forEach(function (ec, i) { c2 += renderElementCard(ec, i); });
+    c2 += '<details class="xcard"><summary>Краткий ход решения (как в прежней версии)</summary>' + (typeof renderSteps === 'function' ? renderSteps(sol.steps) : '') + '</details>';
     c2 += '<div class="xcard sine">' + '<div class="xh">3. Контроль по теореме синусов (основной)</div>' + sineCheck(sol.e).html + '</div>';
     c2 += card('4. Дополнительный контроль по формуле Гаусса (Деламбра)', gauss(sol.e));
     if (sol.small && sol.plane) c2 += '<p><b>Плоский ответ:</b> ' + sol.unknown.map(function (k) { return k + ' = ' + fmt2(sol.plane[k]); }).join('; ') + '.</p>';
-    if (est.exp.length) c2 += '<p>Оценка ' + (est.exp.every(function (x) { return x.f(sol.e); }) ? 'подтвердилась ' + OK : 'не подтвердилась ' + BAD) + '</p>';
+    if (est.exp.length) c2 += '<p><b>Сверка с оценкой (шаг 0):</b> ' + est.exp.map(function (x) { return x.t + ' ' + (x.f(sol.e) ? OK : BAD); }).join('; ') + '. Оценка ' + (est.exp.every(function (x) { return x.f(sol.e); }) ? 'подтвердилась ' + OK : 'не подтвердилась ' + BAD) + '</p>';
   }
   function col(t, b) { return '<details class="xcol" open><summary>' + t + '</summary><div class="xb">' + b + '</div></details>'; }
   return '<div class="cols3">' + col('1. Дано и чертёж', c1) + col('2. Решение', c2) + col('3. Тип треугольника и условия существования', c3) + '</div>';
 }
 function showColumns(host, g, res) {
-  var st = { i: 0, ans: false };
+  var st = { i: 0, ans: false, mode: { ang: '6.12', side: 'auto' } };
   function draw() {
-    host.innerHTML = '<div class="hr"></div>' + buildColumns(g, res, st.i, st.ans);
+    host.innerHTML = '<div class="hr"></div>' + buildColumns(g, res, st.i, st.ans, st.mode);
+    var sa = host.querySelector('#xang'); if (sa) sa.onchange = function () { st.mode.ang = sa.value; draw(); };
+    var ss = host.querySelector('#xside'); if (ss) ss.onchange = function () { st.mode.side = ss.value; draw(); };
     Array.prototype.forEach.call(host.querySelectorAll('.xtabs button'), function (b) { b.onclick = function () { st.i = +b.dataset.i; draw(); }; });
     var t = host.querySelector('#xans'); if (t) t.onchange = function () { st.ans = t.checked; draw(); };
   }
   draw();
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { buildColumns: buildColumns, sineCheck: sineCheck };
+
+/* ===================== Карточки по каждому искомому (ТЗ §3, §3.2, §3.3) ===================== */
+/* Данные карточек — структурные объекты {column, type, what, formula, why, calc:[{type,text}], val}; вёрстка — renderElementCard. */
+var WHY_CARD = {
+  t1: 'По трём сторонам угол находится сразу и независимо от других искомых. ' + WHY['6.9t1'],
+  t2: 'По трём углам сторона находится сразу (полярный аналог (6.9)), независимо от других искомых.',
+  t3side69: 'Сторона против данного угла по двум данным сторонам и углу между ними — прямо (6.9); входят только данные элементы.',
+  t3side614: 'Сторона мала или близка к 0°/180°: cos меняется медленно и (6.9) теряет точность, поэтому по табл. 6.1 и примеру 7.1в берём (6.14). ',
+  t3nep: 'По умолчанию — аналогии Непера (6.12), как в примере 7.1в: оба угла через tg только по данным. Альтернатива — (6.11) котангенсы, как в примере 7.1а (переключатель сверху).',
+  t3cot: 'Выбрана формула котангенсов (6.11), как в примере 7.1а: угол через tg, четверть однозначна, только данные элементы. Альтернатива — аналогии Непера (6.12).',
+  t4nep: 'По табл. 6.1 и примеру 7.1б стороны — по вторым аналогиям Непера (6.13), только по данным. Альтернатива — (6.11).',
+  t4cot: 'Выбрана формула котангенсов (6.11) для четырёх рядом лежащих элементов: сторона через tg, только данные. Альтернатива — аналогии Непера (6.13).',
+  t4ang: 'Третий угол по двум углам и стороне между ними — косинус угла (6.10), только данные элементы.',
+  t56sin: 'Пара «элемент — противолежащий» известна целиком, поэтому проще всего (6.8). Синус даёт два значения x и 180° − x — проверяем оба по (6.5)–(6.7).',
+  t56rest: 'Для типов 5 и 6 по табл. 6.1 без элемента, найденного по синусу, не обойтись — это сказано прямо. Берём аналогию Непера (она даёт tg половины, четверть однозначна). Альтернатива по учебнику — (6.11).',
+  neper: 'Правило Модюи — Непера: I — косинус среднего элемента равен произведению синусов несмежных; II — косинус среднего равен произведению котангенсов смежных. Выбираем ту тройку, где искомый и оба данных элемента.',
+  quad: 'Для четвертного круг строится прямо (6.16): смежные со стороной 90° углы заменяются на 90° − B, 90° − C, противолежащий угол — на 180° − A. (Эквивалентно решению полярного прямоугольного треугольника, см. краткий ход.)'
+};
+function F_(sol) { return sol && sol.small ? fmt2 : fmt; }
+function qCos(X, v, F, x) { return 'cos ' + X + ' ' + (v >= 0 ? '> 0 ⇒ ' + X + ' < 90°' : '< 0 ⇒ ' + X + ' > 90°') + ';   ' + X + ' = ' + F(x) + '.'; }
+function qTg(X, v, F) {
+  var x0 = atan(v);
+  if (v >= 0) return { x: x0, t: 'tg ' + X + ' > 0 ⇒ ' + X + ' < 90°;   ' + X + ' = ' + F(x0) + '.' };
+  return { x: x0 + 180, t: 'tg ' + X + ' = ' + n5(v) + ' < 0 ⇒ ' + X + ' = ' + F(x0) + ' + 180° = ' + F(x0 + 180) + '.' };
+}
+function C_(what, formula, why, calc, val, key) { return { column: 2, type: 'card', what: what, formula: formula, why: why, calc: calc, val: val, key: key }; }
+function cf(t) { return { type: 'f', text: t }; }
+function cp(t) { return { type: 'p', text: t }; }
+function nm(k) { return (k === k.toLowerCase() ? 'Сторона ' : 'Угол ') + k; }
+function other3(L, a, b) { return L.filter(function (k) { return k !== a && k !== b; })[0]; }
+
+function obliqueCards(g, sol, res, mode) {
+  var e = sol.e, F = F_(sol), T = xType(g), out = [];
+  var sd = SIDES.filter(function (k) { return k in g; }), an = ANGS.filter(function (k) { return k in g; });
+  if (T === 1 || T === 2) {
+    var S = T === 1;
+    (S ? ANGS : SIDES).forEach(function (X) {
+      var x = X.toLowerCase() === X ? X.toUpperCase() : X.toLowerCase(); // противолежащий данный
+      var L = S ? SIDES : ANGS, y = other3(L, x, null), z = L.filter(function (k) { return k !== x && k !== y; })[0];
+      var num = S ? cos(g[x]) - cos(g[y]) * cos(g[z]) : cos(g[x]) + cos(g[y]) * cos(g[z]), den = sin(g[y]) * sin(g[z]), v = num / den, r = acos(v);
+      out.push(C_(nm(X), S ? 'cos ' + X + ' = (cos ' + x + ' − cos ' + y + ' · cos ' + z + ') / (sin ' + y + ' · sin ' + z + ') (6.9) — косинус стороны'
+        : 'cos ' + X + ' = (cos ' + x + ' + cos ' + y + ' · cos ' + z + ') / (sin ' + y + ' · sin ' + z + ') (6.10) — косинус угла', (S ? WHY['6.9'].why + ' ' + WHY_CARD.t1 : WHY['6.10'].why + ' ' + WHY_CARD.t2),
+        [cf('cos ' + X + ' = (' + n5(cos(g[x])) + (S ? ' − ' : ' + ') + '(' + n5(cos(g[y])) + ') · (' + n5(cos(g[z])) + ')) / (' + n5(sin(g[y])) + ' · ' + n5(sin(g[z])) + ')'),
+         cf('= ' + n5(num) + ' / ' + n5(den) + ' = ' + n5(v)), cf(qCos(X, v, F, e[X]))], r, X));
+    });
+    return out;
+  }
+  if (T === 3) {
+    var s1 = sd[0], s2 = sd[1], G = an[0], m = G.toLowerCase(), O1 = s1.toUpperCase(), O2 = s2.toUpperCase();
+    var x1 = g[s1], x2 = g[s2], gg = g[G];
+    var use614 = mode.side === '6.14' || (mode.side !== '6.9' && (e[m] < 30 || e[m] > 150 || sol.small));
+    if (use614) {
+      var v14 = Math.pow(sin((x1 - x2) / 2), 2) + sin(x1) * sin(x2) * Math.pow(sin(gg / 2), 2), r14 = 2 * asin(Math.sqrt(v14));
+      out.push(C_(nm(m), 'sin²(' + m + '/2) = sin²[(' + s1 + ' − ' + s2 + ')/2] + sin ' + s1 + ' · sin ' + s2 + ' · sin²(' + G + '/2) (6.14) — преобразованная формула косинуса стороны',
+        WHY_CARD.t3side614 + WHY['6.14'].why + ' Альтернатива — (6.9).',
+        [cf('(' + s1 + ' − ' + s2 + ')/2 = ' + F((x1 - x2) / 2) + ';   ' + G + '/2 = ' + F(gg / 2)),
+         cf('sin²(' + m + '/2) = (' + n5(sin((x1 - x2) / 2)) + ')² + ' + n5(sin(x1)) + ' · ' + n5(sin(x2)) + ' · (' + n5(sin(gg / 2)) + ')² = ' + n5(v14)),
+         cf('sin(' + m + '/2) = √' + n5(v14) + ' = ' + n5(Math.sqrt(v14)) + ';   ' + m + '/2 всегда в I четверти (0°…90°) ⇒ ' + m + '/2 = ' + F(r14 / 2)),
+         cf(m + ' = ' + F(e[m]) + '.')], r14, m));
+    } else {
+      var v9 = cos(x1) * cos(x2) + sin(x1) * sin(x2) * cos(gg);
+      out.push(C_(nm(m), 'cos ' + m + ' = cos ' + s1 + ' · cos ' + s2 + ' + sin ' + s1 + ' · sin ' + s2 + ' · cos ' + G + ' (6.9) — косинус стороны',
+        WHY['6.9'].why + ' ' + WHY_CARD.t3side69 + ' Если сторона мала или близка к 0°/180°, берётся (6.14).',
+        [cf('cos ' + m + ' = ' + n5(cos(x1)) + ' · ' + n5(cos(x2)) + ' + ' + n5(sin(x1)) + ' · ' + n5(sin(x2)) + ' · ' + n5(cos(gg)) + ' = ' + n5(v9)), cf(qCos(m, v9, F, e[m]))], acos(v9), m));
+    }
+    if (mode.ang === '6.11') {
+      [[O1, s1, s2], [O2, s2, s1]].forEach(function (q) {
+        var den = sin(g[q[2]]) * ctg(g[q[1]]) - cos(gg) * cos(g[q[2]]), v = sin(gg) / den, r = qTg(q[0], v, F);
+        out.push(C_(nm(q[0]), 'tg ' + q[0] + ' = sin ' + G + ' / (sin ' + q[2] + ' · ctg ' + q[1] + ' − cos ' + G + ' · cos ' + q[2] + ') (6.11) — котангенсы',
+          WHY['6.11'].why + ' ' + WHY_CARD.t3cot,
+          [cf('tg ' + q[0] + ' = ' + n5(sin(gg)) + ' / (' + n5(sin(g[q[2]])) + ' · ' + n5(ctg(g[q[1]])) + ' − ' + n5(cos(gg)) + ' · ' + n5(cos(g[q[2]])) + ')'),
+           cf('= ' + n5(sin(gg)) + ' / ' + n5(den) + ' = ' + n5(v)), cf(r.t)], r.x, q[0]));
+      });
+    } else {
+      var np = napierPair(x1, x2, gg, true);
+      var ts = cos((x1 - x2) / 2) / cos((x1 + x2) / 2) * ctg(gg / 2), td = sin((x1 - x2) / 2) / sin((x1 + x2) / 2) * ctg(gg / 2);
+      var base = [cf('(' + s1 + ' + ' + s2 + ')/2 = ' + F((x1 + x2) / 2) + ';   (' + s1 + ' − ' + s2 + ')/2 = ' + F((x1 - x2) / 2) + ';   ' + G + '/2 = ' + F(gg / 2)),
+        cf('tg[(' + O1 + ' + ' + O2 + ')/2] = ' + n5(cos((x1 - x2) / 2)) + ' / ' + n5(cos((x1 + x2) / 2)) + ' · ' + n5(ctg(gg / 2)) + ' = ' + n5(ts)),
+        cf('tg[(' + O1 + ' − ' + O2 + ')/2] = ' + n5(sin((x1 - x2) / 2)) + ' / ' + n5(sin((x1 + x2) / 2)) + ' · ' + n5(ctg(gg / 2)) + ' = ' + n5(td)),
+        cp(ts < 0 ? 'tg полусуммы < 0, а (' + s1 + ' + ' + s2 + ')/2 > 90° ⇒ по (6.5) и полусумма углов > 90°: (' + O1 + ' + ' + O2 + ')/2 = ' + F(atan(ts)) + ' + 180° = ' + F(np.hs) + '.'
+          : 'tg полусуммы > 0 ⇒ (' + O1 + ' + ' + O2 + ')/2 = ' + F(np.hs) + ' < 90° (та же четверть, что у полусуммы сторон, (6.5)).'),
+        cf('(' + O1 + ' − ' + O2 + ')/2 = ' + F(np.hd) + ' (полуразность всегда между −90° и 90°).')];
+      var fN = 'tg[(' + O1 + ' ± ' + O2 + ')/2] = cos или sin[(' + s1 + ' − ' + s2 + ')/2] / cos или sin[(' + s1 + ' + ' + s2 + ')/2] · ctg(' + G + '/2) (6.12) — аналогии Непера';
+      out.push(C_(nm(O1), fN, WHY['6.12'].why + ' ' + WHY_CARD.t3nep, base.concat([cf(O1 + ' = ' + joinAdd(np.hs, np.hd) + ' = ' + F(e[O1]) + '.')]), np.first, O1));
+      out.push(C_(nm(O2), fN, 'Из той же пары аналогий, что и ' + O1 + ' (сложение «столбиком»): разность полусуммы и полуразности. ' + WHY_CARD.t3nep,
+        [cf('(' + O1 + ' + ' + O2 + ')/2 = ' + F(np.hs) + ';   (' + O1 + ' − ' + O2 + ')/2 = ' + F(np.hd)), cf(O2 + ' = ' + joinAdd(np.hs, -np.hd) + ' = ' + F(e[O2]) + '.')], np.second, O2));
+    }
+    return out;
+  }
+  if (T === 4) {
+    var A1 = an[0], A2 = an[1], c0 = sd[0], M = c0.toUpperCase(), l1 = A1.toLowerCase(), l2 = A2.toLowerCase();
+    var g1 = g[A1], g2 = g[A2], cc = g[c0];
+    if (mode.ang === '6.11') {
+      [[l1, A1, A2], [l2, A2, A1]].forEach(function (q) {
+        var den = cos(cc) * cos(g[q[2]]) + sin(g[q[2]]) * ctg(g[q[1]]), v = sin(cc) / den, r = qTg(q[0], v, F);
+        out.push(C_(nm(q[0]), 'tg ' + q[0] + ' = sin ' + c0 + ' / (cos ' + c0 + ' · cos ' + q[2] + ' + sin ' + q[2] + ' · ctg ' + q[1] + ') (6.11) — котангенсы',
+          WHY['6.11'].why + ' ' + WHY_CARD.t4cot,
+          [cf('tg ' + q[0] + ' = ' + n5(sin(cc)) + ' / (' + n5(cos(cc)) + ' · ' + n5(cos(g[q[2]])) + ' + ' + n5(sin(g[q[2]])) + ' · ' + n5(ctg(g[q[1]])) + ')'),
+           cf('= ' + n5(sin(cc)) + ' / ' + n5(den) + ' = ' + n5(v)), cf(r.t)], r.x, q[0]));
+      });
+    } else {
+      var np2 = napierPair(g1, g2, cc, false);
+      var ts2 = cos((g1 - g2) / 2) / cos((g1 + g2) / 2) * tg(cc / 2), td2 = sin((g1 - g2) / 2) / sin((g1 + g2) / 2) * tg(cc / 2);
+      var b2 = [cf('(' + A1 + ' + ' + A2 + ')/2 = ' + F((g1 + g2) / 2) + ';   (' + A1 + ' − ' + A2 + ')/2 = ' + F((g1 - g2) / 2) + ';   ' + c0 + '/2 = ' + F(cc / 2)),
+        cf('tg[(' + l1 + ' + ' + l2 + ')/2] = ' + n5(cos((g1 - g2) / 2)) + ' / ' + n5(cos((g1 + g2) / 2)) + ' · ' + n5(tg(cc / 2)) + ' = ' + n5(ts2)),
+        cf('tg[(' + l1 + ' − ' + l2 + ')/2] = ' + n5(sin((g1 - g2) / 2)) + ' / ' + n5(sin((g1 + g2) / 2)) + ' · ' + n5(tg(cc / 2)) + ' = ' + n5(td2)),
+        cp(ts2 < 0 ? 'tg полусуммы < 0, (' + A1 + ' + ' + A2 + ')/2 > 90° ⇒ по (6.5) полусумма сторон > 90°: ' + F(atan(ts2)) + ' + 180° = ' + F(np2.hs) + '.'
+          : 'tg полусуммы > 0 ⇒ (' + l1 + ' + ' + l2 + ')/2 = ' + F(np2.hs) + ' < 90° (по (6.5) та же четверть, что у полусуммы углов).'),
+        cf('(' + l1 + ' − ' + l2 + ')/2 = ' + F(np2.hd) + '.')];
+      var fN2 = 'tg[(' + l1 + ' ± ' + l2 + ')/2] = cos или sin[(' + A1 + ' − ' + A2 + ')/2] / cos или sin[(' + A1 + ' + ' + A2 + ')/2] · tg(' + c0 + '/2) (6.13) — аналогии Непера';
+      out.push(C_(nm(l1), fN2, WHY['6.13'].why + ' ' + WHY_CARD.t4nep, b2.concat([cf(l1 + ' = ' + joinAdd(np2.hs, np2.hd) + ' = ' + F(e[l1]) + '.')]), np2.first, l1));
+      out.push(C_(nm(l2), fN2, 'Из той же пары аналогий, что и ' + l1 + ': полусумма минус полуразность. ' + WHY_CARD.t4nep,
+        [cf('(' + l1 + ' + ' + l2 + ')/2 = ' + F(np2.hs) + ';   (' + l1 + ' − ' + l2 + ')/2 = ' + F(np2.hd)), cf(l2 + ' = ' + joinAdd(np2.hs, -np2.hd) + ' = ' + F(e[l2]) + '.')], np2.second, l2));
+    }
+    var v10 = -cos(g1) * cos(g2) + sin(g1) * sin(g2) * cos(cc);
+    out.push(C_(nm(M), 'cos ' + M + ' = − cos ' + A1 + ' · cos ' + A2 + ' + sin ' + A1 + ' · sin ' + A2 + ' · cos ' + c0 + ' (6.10) — косинус угла', WHY['6.10'].why + ' ' + WHY_CARD.t4ang,
+      [cf('cos ' + M + ' = − ' + '(' + n5(cos(g1)) + ') · (' + n5(cos(g2)) + ') + ' + n5(sin(g1)) + ' · ' + n5(sin(g2)) + ' · ' + n5(cos(cc)) + ' = ' + n5(v10)), cf(qCos(M, v10, F, e[M]))], acos(v10), M));
+    return out;
+  }
+  // Типы 5 и 6
+  var isT5 = T === 5, P, Q, K, opp, k2, rest, third, thirdOpp;
+  if (isT5) { P = an[0]; opp = P.toLowerCase(); Q = sd.filter(function (k) { return k !== opp; })[0]; K = Q.toUpperCase(); }
+  else { opp = sd[0]; P = opp.toUpperCase(); var Qa = an.filter(function (k) { return k !== P; })[0]; Q = Qa; K = Qa.toLowerCase(); }
+  // T5: данные opp (сторона), Q (сторона), P (угол против opp); ищем K (угол против Q) по синусу.
+  // T6: данные opp (сторона), P (угол против opp), Q (угол); ищем K (сторона против Q).
+  var sK = sin(g[Q]) * sin(g[P]) / sin(g[opp]);
+  var cand = candidates(g, T, res) || [];
+  var calc = [cf('sin ' + K + ' = sin ' + Q + ' · sin ' + P + ' / sin ' + opp + ' = ' + n5(sin(g[Q])) + ' · ' + n5(sin(g[P])) + ' / ' + n5(sin(g[opp])) + ' = ' + n5(sK))];
+  if (cand.length && Math.abs(sK - 1) > 1e-6) {
+    calc.push(cf(K + '₁ = arcsin ' + n5(sK) + ' = ' + F(cand[0].x) + ';   ' + K + '₂ = 180° − ' + K + '₁ = ' + F(cand[1].x)));
+    cand.forEach(function (c) {
+      var mine = Math.abs(c.x - e[K]) < 1e-3;
+      calc.push(cp(c.name + ' = ' + F(c.x) + ': ' + (c.ok ? (mine ? 'принят — проходит (6.5)–(6.7) ' + OK : 'тоже проходит — это другое решение (вкладка сверху)') : 'отброшен — ' + c.why + ' ' + BAD)));
+    });
+  } else calc.push(cp('sin ' + K + ' = 1 ⇒ ' + K + ' = 90° (единственное значение).'));
+  calc.push(cf(K + ' = ' + F(e[K]) + '.'));
+  out.push(C_(nm(K), 'sin ' + opp + ' / sin ' + P + ' = sin ' + Q + ' / sin ' + K + ' (6.8) — формула синусов', WHY['6.8'].why + ' ' + WHY_CARD.t56sin, calc, e[K], K));
+  // третья сторона и третий угол по аналогиям Непера (как в движке)
+  var sides2 = isT5 ? [opp, Q] : [opp, K], angs2 = isT5 ? [P, K] : [P, Q];
+  var ms = other3(SIDES, sides2[0], sides2[1]), MA = ms.toUpperCase();
+  var sa = e[sides2[0]], sb = e[sides2[1]], A_ = e[angs2[0]], B_ = e[angs2[1]];
+  var useSin = Math.abs(sin((A_ - B_) / 2)) >= Math.abs(cos((A_ - B_) / 2));
+  var t = useSin ? tg((sa - sb) / 2) * sin((A_ + B_) / 2) / sin((A_ - B_) / 2) : tg((sa + sb) / 2) * cos((A_ + B_) / 2) / cos((A_ - B_) / 2);
+  var fs = useSin ? 'tg(' + ms + '/2) = tg[(' + sides2[0] + ' − ' + sides2[1] + ')/2] · sin[(' + angs2[0] + ' + ' + angs2[1] + ')/2] / sin[(' + angs2[0] + ' − ' + angs2[1] + ')/2]'
+    : 'tg(' + ms + '/2) = tg[(' + sides2[0] + ' + ' + sides2[1] + ')/2] · cos[(' + angs2[0] + ' + ' + angs2[1] + ')/2] / cos[(' + angs2[0] + ' − ' + angs2[1] + ')/2]';
+  out.push(C_(nm(ms), fs + ' (6.13) — аналогия Непера (обращённая)', WHY_CARD.t56rest + (useSin ? '' : ' Здесь ' + angs2[0] + ' ≈ ' + angs2[1] + ' (равнобедренный): sin[(' + angs2[0] + ' − ' + angs2[1] + ')/2] = 0, поэтому берём вторую аналогию.'),
+    [cf('tg(' + ms + '/2) = ' + (useSin ? n5(tg((sa - sb) / 2)) + ' · ' + n5(sin((A_ + B_) / 2)) + ' / ' + n5(sin((A_ - B_) / 2)) : n5(tg((sa + sb) / 2)) + ' · ' + n5(cos((A_ + B_) / 2)) + ' / ' + n5(cos((A_ - B_) / 2))) + ' = ' + n5(t)),
+     cp(ms + '/2 лежит в 0°…90°, tg > 0 ⇒ ' + ms + '/2 = ' + F(atan(t))), cf(ms + ' = ' + F(e[ms]) + '.')], 2 * atan(t), ms));
+  var cot = tg((A_ + B_) / 2) * cos((sa + sb) / 2) / cos((sa - sb) / 2), rC = 2 * Math.atan2(1, cot) / D;
+  out.push(C_(nm(MA), 'ctg(' + MA + '/2) = tg[(' + angs2[0] + ' + ' + angs2[1] + ')/2] · cos[(' + sides2[0] + ' + ' + sides2[1] + ')/2] / cos[(' + sides2[0] + ' − ' + sides2[1] + ')/2] (6.12) — аналогия Непера (обращённая)',
+    WHY_CARD.t56rest,
+    [cf('ctg(' + MA + '/2) = ' + n5(tg((A_ + B_) / 2)) + ' · ' + n5(cos((sa + sb) / 2)) + ' / ' + n5(cos((sa - sb) / 2)) + ' = ' + n5(cot)),
+     cp(MA + '/2 лежит в 0°…90° ⇒ ' + MA + '/2 = ' + F(rC / 2)), cf(MA + ' = ' + F(e[MA]) + '.')], rC, MA));
+  return out;
+}
+
+/* ---- Круг Модюи — Непера: общий решатель для прямоугольного и четвертного ---- */
+function neperParts(info) {
+  // порядок по кругу; kind: 'c90' — 90° − x, 'c180' — 180° − x, 'id' — сам элемент
+  if (info.right) { var m = info.m; return [[m.c, 'c90'], [m.B, 'id'], [m.a, 'id'], [m.C, 'id'], [m.b, 'c90']]; }
+  var q = info.qm; return [[q.C, 'c90'], [q.b, 'id'], [q.A, 'c180'], [q.c, 'id'], [q.B, 'c90']];
+}
+function partName(p) { return p[1] === 'c90' ? '(90° − ' + p[0] + ')' : p[1] === 'c180' ? '(180° − ' + p[0] + ')' : p[0]; }
+// упрощение: внешняя функция fn от части → {s: знак, fn, el}
+function simp(fn, p) {
+  if (p[1] === 'id') return { s: 1, fn: fn, el: p[0] };
+  if (p[1] === 'c90') return { s: 1, fn: { sin: 'cos', cos: 'sin', ctg: 'tg', tg: 'ctg' }[fn], el: p[0] };
+  return { s: fn === 'sin' ? 1 : -1, fn: fn, el: p[0] };
+}
+function fv(fn, x) { return { sin: sin, cos: cos, tg: tg, ctg: ctg }[fn](x); }
+function termS(t) { return t.fn + ' ' + t.el; }
+function neperCards(g, sol, info) {
+  var e = sol.e, F = F_(sol), P = neperParts(info), out = [];
+  var known = P.filter(function (p) { return p[0] in g; }).map(function (p) { return p[0]; });
+  var idx = function (k) { for (var i = 0; i < 5; i++) if (P[i][0] === k) return i; return -1; };
+  var num = '(6.' + (info.right ? 15 : 16) + ')';
+  P.forEach(function (p) {
+    var X = p[0]; if (X in g) return;
+    var ids = [idx(X), idx(known[0]), idx(known[1])];
+    if (ids.some(function (i) { return i < 0; })) return;
+    // ищем средний: элемент, у которого два других — оба смежные (II) или оба несмежные (I)
+    var mid = null, rule = null;
+    ids.forEach(function (i) {
+      var o = ids.filter(function (j) { return j !== i; });
+      var adj = o.map(function (j) { var d = Math.abs(i - j); return d === 1 || d === 4; });
+      if (adj[0] && adj[1]) { mid = i; rule = 'II'; } else if (!adj[0] && !adj[1] && mid === null) { mid = i; rule = 'I'; }
+    });
+    var oth = ids.filter(function (j) { return j !== mid; });
+    var ofn = rule === 'II' ? 'ctg' : 'sin';
+    var Lt = simp('cos', P[mid]), R1 = simp(ofn, P[oth[0]]), R2 = simp(ofn, P[oth[1]]);
+    var raw = 'cos ' + partName(P[mid]) + ' = ' + ofn + ' ' + partName(P[oth[0]]) + ' · ' + ofn + ' ' + partName(P[oth[1]]);
+    var sg = Lt.s * R1.s * R2.s; // L = sg · R1·R2 в упрощённом виде (знаки вынесены)
+    var simpl = termS(Lt) + ' = ' + (sg < 0 ? '− ' : '') + termS(R1) + ' · ' + termS(R2);
+    var calc = [], v, fnX, expr;
+    var val = function (t) { return fv(t.fn, g[t.el]); };
+    if (P[mid][0] === X) {
+      fnX = Lt.fn; v = sg * val(R1) * val(R2);
+      expr = fnX + ' ' + X + ' = ' + (sg < 0 ? '− ' : '') + termS(R1) + ' · ' + termS(R2);
+      calc.push(cf(fnX + ' ' + X + ' = ' + (sg < 0 ? '− ' : '') + '(' + n5(val(R1)) + ') · (' + n5(val(R2)) + ') = ' + n5(v)));
+    } else {
+      var RX = R1.el === X ? R1 : R2, Ro = R1.el === X ? R2 : R1;
+      fnX = RX.fn; v = sg * fv(Lt.fn, g[Lt.el]) / val(Ro);
+      if (fnX === 'ctg') { fnX = 'tg'; v = 1 / v; expr = 'tg ' + X + ' = ' + (sg < 0 ? '− ' : '') + termS(Ro) + ' / ' + termS(Lt); calc.push(cf(expr.replace(termS(Ro), '(' + n5(val(Ro)) + ')').replace(termS(Lt), '(' + n5(fv(Lt.fn, g[Lt.el])) + ')') + ' = ' + n5(v))); }
+      else { expr = fnX + ' ' + X + ' = ' + (sg < 0 ? '− ' : '') + termS(Lt) + ' / ' + termS(Ro); calc.push(cf(fnX + ' ' + X + ' = ' + (sg < 0 ? '− ' : '') + '(' + n5(fv(Lt.fn, g[Lt.el])) + ') / (' + n5(val(Ro)) + ') = ' + n5(v))); }
+    }
+    var r;
+    if (fnX === 'cos') { r = acos(v); calc.push(cf(qCos(X, v, F, e[X]))); }
+    else if (fnX === 'tg') { var qq = qTg(X, v, F); r = qq.x; calc.push(cf(qq.t)); }
+    else if (fnX === 'ctg') { var q2 = qTg(X, 1 / v, F); r = q2.x; calc.push(cf('tg ' + X + ' = 1 / ' + n5(v) + ' = ' + n5(1 / v))); calc.push(cf(q2.t)); }
+    else { // sin — два кандидата
+      var x1 = asin(v), x2 = 180 - x1; r = Math.abs(x1 - e[X]) < Math.abs(x2 - e[X]) ? x1 : x2;
+      if (Math.abs(v - 1) < 1e-6) calc.push(cp('sin ' + X + ' = 1 ⇒ ' + X + ' = 90°.'));
+      else {
+        calc.push(cf(X + '₁ = ' + F(x1) + ';   ' + X + '₂ = 180° − ' + X + '₁ = ' + F(x2)));
+        var multi = sol.multi;
+        calc.push(cp(multi ? 'Оба значения возможны (данные — катет и противолежащий угол): в этом решении ' + X + ' = ' + F(e[X]) + ', другое — на соседней вкладке.'
+          : 'Выбор по п. 9 и (6.5)–(6.7): ' + X + ' = ' + F(r) + ' согласуется с остальными элементами; ' + X + (r === x1 ? '₂ = ' + F(x2) : '₁ = ' + F(x1)) + ' отброшен — с ним нарушается п. 9 (элемент и противолежащий — в одной четверти) или (6.7).'));
+      }
+    }
+    if (fnX === 'sin') calc.push(cf(X + ' = ' + F(e[X]) + '.'));
+    var adjL = [(idx(X) + 1) % 5, (idx(X) + 4) % 5].map(function (i) { return partName(P[i]); }), nadjL = [(idx(X) + 2) % 5, (idx(X) + 3) % 5].map(function (i) { return partName(P[i]); });
+    out.push(C_(nm(X), 'Правило ' + rule + ': ' + raw + ' ⇒ ' + simpl + (expr !== simpl ? ' ⇒ ' + expr : '') + ' ' + num,
+      'В круге у ' + partName(P[idx(X)]) + ' смежные: ' + adjL.join(', ') + '; несмежные: ' + nadjL.join(', ') + '. Средний элемент тройки (искомый + два данных) — ' + partName(P[mid]) + ', остальные ему ' + (rule === 'II' ? 'смежные ⇒ правило II (котангенсы смежных)' : 'несмежные ⇒ правило I (синусы несмежных)') + '. В формулу входят только данные. ' + (info.right ? '' : WHY_CARD.quad),
+      calc, r, X));
+  });
+  return out;
+}
+function neperRulesHtml(info) {
+  var P = neperParts(info);
+  return '<div class="f">По кругу: ' + P.map(partName).join(' → ') + ' → (снова) ' + partName(P[0]) + '</div>' +
+    '<p>I: косинус среднего = произведению синусов несмежных. II: косинус среднего = произведению котангенсов смежных.</p>' +
+    P.map(function (p, i) {
+      var a1 = P[(i + 1) % 5], a2 = P[(i + 4) % 5], n1 = P[(i + 2) % 5], n2 = P[(i + 3) % 5];
+      return '<div class="f">cos ' + partName(p) + ' = sin ' + partName(n1) + ' · sin ' + partName(n2) + ' = ctg ' + partName(a1) + ' · ctg ' + partName(a2) + '</div>';
+    }).join('');
+}
+function buildElementCards(g, sol, res, mode) {
+  var info = rightInfo(g);
+  if (info.right || info.quad) return neperCards(g, sol, info);
+  return obliqueCards(g, sol, res, mode || { ang: '6.12', side: 'auto' });
+}
+function renderElementCard(c, i) {
+  return '<div class="xcard ecard"><div class="xh">2.' + (i + 1) + '. ' + c.what + '</div>' +
+    '<div class="erow"><b>Что ищем:</b> ' + c.what + '</div>' +
+    '<div class="erow"><b>Формула:</b> <span class="f">' + c.formula + '</span></div>' +
+    '<div class="erow why"><b>Почему она:</b> ' + c.why + '</div>' +
+    '<div class="erow"><b>Подстановка и счёт:</b>' + c.calc.map(function (s) { return '<div class="' + s.type + '">' + s.text + '</div>'; }).join('') + '</div></div>';
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { buildColumns: buildColumns, sineCheck: sineCheck, buildElementCards: buildElementCards };
