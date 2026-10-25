@@ -436,14 +436,17 @@ function pickerRow(host) {
   if (sel[1]) sel[1].value = 'b';
   if (sel[2]) sel[2].value = 'c';
 }
+function numv(v) {
+  return parseFloat(String(v || '').replace(/[\s\u00a0\u202f°º˚′'’‘ʹ″"]/g, '').replace(/[−–]/g, '-').replace(',', '.'));
+}
 function readRow(host) {
   var out = {}, bad = null;
   $$('.el', host).forEach(function (d) {
     d.classList.remove('bad');
     var k = $('select', d).value;
     var inp = $$('input', d);
-    var dg = parseFloat((inp[0].value || '0').replace(',', '.'));
-    var mn = parseFloat((inp[1].value || '0').replace(',', '.'));
+    var dg = inp[0].value.trim() === '' ? 0 : numv(inp[0].value);
+    var mn = inp[1].value.trim() === '' ? 0 : numv(inp[1].value);
     if (!isFinite(dg) || !isFinite(mn)) { bad = 'В числах допущена ошибка.'; d.classList.add('bad'); return; }
     if (mn < 0 || mn >= 60) { bad = 'Минуты должны быть от 0 до 59,9.'; d.classList.add('bad'); return; }
     if (k in out) { bad = 'Один и тот же элемент выбран дважды.'; d.classList.add('bad'); }
@@ -497,8 +500,8 @@ function readAnswers(host) {
     var blank = inp[0].value.trim() === '' && inp[1].value.trim() === '';
     if (blank) { empty = true; return; }
     any = true;
-    var dg = parseFloat(inp[0].value.replace(',', '.'));
-    var mn = parseFloat((inp[1].value || '0').replace(',', '.'));
+    var dg = numv(inp[0].value);
+    var mn = inp[1].value.trim() === '' ? 0 : numv(inp[1].value);
     if (inp[0].value.trim() === '') dg = 0;
     if (!isFinite(dg) || !isFinite(mn)) { err = 'В числах допущена ошибка.'; d.classList.add('bad'); return; }
     if (mn < 0 || mn >= 60) { err = 'Минуты должны быть от 0 до 59,9.'; d.classList.add('bad'); return; }
@@ -551,13 +554,19 @@ $('#cex').onclick = function () {
   msg($('#cm1'), 'info', 'Пример: ' + ex.title + '.');
 };
 $('#cgo').onclick = function () {
+  try { cgoRun(); } catch (e) {
+    msg($('#cm1'), 'bad', 'Ошибка приложения: ' + (e && e.message ? e.message : e) + '. Обновите страницу (закройте и откройте приложение).');
+  }
+};
+function cgoRun() {
+  if (typeof solve !== 'function' || typeof showColumns !== 'function') throw new Error('модуль расчёта не загрузился');
   var r = readRow($('#cin'));
   if (r.err) { msg($('#cm1'), 'bad', r.err); $('#cout').innerHTML = ''; return; }
   var s = solve(r.g);
   if (s.error) { msg($('#cm1'), 'bad', s.error); showColumns($('#cout'), r.g, s); return; }
   msg($('#cm1'), s.nearLimit ? 'info' : '', s.nearLimit || '');
   showColumns($('#cout'), r.g, s);
-};
+}
 
 function selfTest() {
   var fails = [];
