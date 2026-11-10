@@ -1,0 +1,3 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const root=path.resolve(__dirname,'..');
+test('all inherited page self-tests remain green',()=>{const html=fs.readFileSync(path.join(root,'index.html'),'utf8'),body=html.match(/function selfTest\(\) \{[\s\S]*?\n}\nwindow.selfTest/)[0].replace(/\nwindow.selfTest$/,'');const ctx={console,Math};vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'engine.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'explain.js'),'utf8')+'\n'+body,ctx);assert.equal(JSON.stringify(ctx.selfTest()),'[]');});
