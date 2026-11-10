@@ -202,6 +202,10 @@ footer{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
 input,select,textarea{font-size:16px}
 html{-webkit-text-size-adjust:100%}
 </style>
+<!-- textbook-math -->
+<link rel="stylesheet" href="math/katex.css">
+<link rel="stylesheet" href="math/formulas.css">
+<!-- /textbook-math -->
 </head>
 <body>
 <header>
@@ -615,5 +619,9 @@ window.selfTest = selfTest;
 go('home');
 </script>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{scope:'./'});});}</script>
+<!-- textbook-math -->
+<script src="math/katex.js"></script>
+<script src="math/formulas.js"></script>
+<!-- /textbook-math -->
 </body>
 </html>
